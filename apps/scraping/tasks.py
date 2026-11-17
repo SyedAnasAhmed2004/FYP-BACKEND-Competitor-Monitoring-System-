@@ -7,6 +7,7 @@ from django.utils import timezone
 from django.conf import settings
 import logging
 import requests
+from utils.url_safety import UnsafeURLError, install_playwright_guard, safe_head
 from urllib.parse import urlparse
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from bs4 import BeautifulSoup
@@ -151,10 +152,13 @@ def extract_competitor_links(competitor_id):
         }
         
         try:
-            response_check = requests.head(input_url, headers=headers_check, timeout=5)
+            response_check = safe_head(input_url, headers=headers_check, timeout=5)
             if response_check.status_code >= 500:
                 logger.error(f"Website returned server error ({response_check.status_code}): {input_url}")
                 return {"status": "error", "message": f"Server error {response_check.status_code}"}
+        except UnsafeURLError as e:
+            logger.warning(f"Blocked non-public URL for competitor {competitor.name}: {input_url} ({e})")
+            return {"status": "error", "message": "URL must point to a public website"}
         except requests.exceptions.RequestException as e:
             logger.error(f"Website unreachable: {input_url} - {str(e)}")
             return {"status": "error", "message": "Website unreachable"}
@@ -283,6 +287,7 @@ def scrape_competitor_html(competitor_id, use_filtered_links=False):
                     context.add_init_script(
                         "Object.defineProperty(navigator, 'webdriver', {get: () => false});"
                     )
+                    install_playwright_guard(context)
                     page = context.new_page()
                     page.goto(url, wait_until="domcontentloaded", timeout=60000)
 
@@ -723,6 +728,7 @@ def _step2_scrape_html(competitor, urls_to_scrape):
                 context.add_init_script(
                     "Object.defineProperty(navigator, 'webdriver', {get: () => false});"
                 )
+                install_playwright_guard(context)
                 page = context.new_page()
                 page.goto(url, wait_until="domcontentloaded", timeout=60000)
 

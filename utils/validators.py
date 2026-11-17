@@ -7,6 +7,8 @@ import re
 import requests
 import logging
 
+from utils.url_safety import UnsafeURLError, UnresolvableHostError, safe_head
+
 logger = logging.getLogger(__name__)
 
 
@@ -64,15 +66,22 @@ def validate_url_exists(url):
     }
 
     try:
-        response = requests.head(url, headers=headers, timeout=10, allow_redirects=True)
+        # safe_head refuses private/loopback/link-local targets, including via redirects
+        safe_head(url, headers=headers, timeout=10)
         # Any response (including 4xx/5xx) means the domain exists
         return True, url
+    except UnresolvableHostError:
+        return False, f"Domain does not exist: {url}"
+    except UnsafeURLError:
+        return False, "This URL is not allowed: it must point to a public website."
     except requests.exceptions.ConnectionError as e:
         err_str = str(e).lower()
         # Only reject on DNS failure — the domain genuinely doesn't exist
-        if 'name or service not known' in err_str or 'nodename nor servname' in err_str \
-                or 'getaddrinfo failed' in err_str or 'name resolution' in err_str \
-                or 'no such host' in err_str:
+        dns_failure_markers = (
+            'name or service not known', 'nodename nor servname',
+            'getaddrinfo failed', 'name resolution', 'no such host',
+        )
+        if any(marker in err_str for marker in dns_failure_markers):
             return False, f"Domain does not exist: {url}"
         # Any other connection error (firewall, bot-blocking, etc.) — accept it
         logger.warning(f"Connection issue for {url} (assuming site exists): {e}")
