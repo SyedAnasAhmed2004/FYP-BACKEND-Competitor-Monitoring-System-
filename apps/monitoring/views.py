@@ -2,6 +2,7 @@ from rest_framework import viewsets, status, generics
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.authtoken.models import Token
 from rest_framework.authtoken.views import ObtainAuthToken
 from django.contrib.auth import authenticate, logout
@@ -38,6 +39,7 @@ from .serializers import (
     HTMLSnapshotSerializer, HTMLDifferenceSerializer
 )
 from utils.validators import validate_url_exists
+from utils.authentication import get_fresh_token
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +49,14 @@ class RegisterView(generics.CreateAPIView):
     queryset = User.objects.all()
     serializer_class = UserRegistrationSerializer
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'register'
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
-        token, created = Token.objects.get_or_create(user=user)
+        token = get_fresh_token(user)
         
         return Response({
             'user': UserSerializer(user).data,
@@ -61,22 +65,31 @@ class RegisterView(generics.CreateAPIView):
 
 
 class LoginView(ObtainAuthToken):
-    """User login endpoint."""
+    """User login endpoint (rate limited per client IP)."""
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'login'
 
     def post(self, request, *args, **kwargs):
         username = request.data.get('username')
         password = request.data.get('password')
-        
+
+        if not isinstance(username, str) or not isinstance(password, str)                 or not username.strip() or not password:
+            return Response(
+                {'error': 'Username and password are required.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         user = authenticate(username=username, password=password)
-        
+
         if user:
-            token, created = Token.objects.get_or_create(user=user)
+            token = get_fresh_token(user)
             return Response({
                 'user': UserSerializer(user).data,
                 'token': token.key
             })
-        
+
+        # Same message whether the username or the password was wrong.
         return Response(
             {'error': 'Invalid credentials'},
             status=status.HTTP_401_UNAUTHORIZED
@@ -90,7 +103,8 @@ class LogoutView(generics.GenericAPIView):
     def post(self, request):
         try:
             request.user.auth_token.delete()
-        except:
+        except (AttributeError, Token.DoesNotExist):
+            # No token to delete (e.g. session-authenticated request)
             pass
         logout(request)
         return Response({'message': 'Successfully logged out'}, status=status.HTTP_200_OK)

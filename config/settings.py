@@ -16,8 +16,32 @@ load_dotenv()
 # Build paths inside the project
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# SECURITY WARNING: don't run with debug turned on in production!
+# Defaults to False so a missing .env value fails safe.
+DEBUG = os.getenv('DEBUG', 'False').strip().lower() == 'true'
+
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', 'django-insecure-change-this-in-production')
+_DEV_FALLBACK_SECRET_KEY = 'django-insecure-dev-only-key-do-not-use-in-production'
+SECRET_KEY = os.getenv('DJANGO_SECRET_KEY', '').strip()
+_secret_key_is_weak = (
+    len(SECRET_KEY) < 50
+    or SECRET_KEY.startswith('django-insecure')
+    or 'change-this' in SECRET_KEY
+    or 'your-secret-key' in SECRET_KEY
+)
+if _secret_key_is_weak:
+    if not DEBUG:
+        from django.core.exceptions import ImproperlyConfigured
+        raise ImproperlyConfigured(
+            'DJANGO_SECRET_KEY must be set to a unique random value of at least 50 characters '
+            'when DEBUG is False. Generate one with: '
+            'python -c "from django.core.management.utils import get_random_secret_key; '
+            'print(get_random_secret_key())"'
+        )
+    SECRET_KEY = SECRET_KEY or _DEV_FALLBACK_SECRET_KEY
+
+# Auth tokens expire after this many days; users must log in again afterwards.
+TOKEN_TTL_DAYS = int(os.getenv('TOKEN_TTL_DAYS', '14'))
 
 # Firecrawl API Configuration
 FIRECRAWL_API_KEY = os.getenv('FIRECRAWL_API_KEY', '')
@@ -48,10 +72,17 @@ RAG_CACHE_TTL = int(os.getenv('RAG_CACHE_TTL', '7200'))  # seconds; 0 disables c
 # Maximum number of subpage links allowed per competitor
 MAX_COMPETITOR_LINKS = int(os.getenv('MAX_COMPETITOR_LINKS', '500'))
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv('DEBUG', 'True') == 'True'
+# Django admin site: where it lives and who may reach it (see utils/admin_security.py).
+# Anyone not on the allowlist gets a 404. Change ADMIN_URL to something non-obvious in production.
+ADMIN_URL = os.getenv('ADMIN_URL', 'admin/').strip().lstrip('/')
+if ADMIN_URL and not ADMIN_URL.endswith('/'):
+    ADMIN_URL += '/'
+ADMIN_ALLOWED_IPS = [ip for ip in os.getenv('ADMIN_ALLOWED_IPS', '127.0.0.1,::1').split(',') if ip.strip()]
+ADMIN_TRUSTED_PROXY_COUNT = int(os.getenv('ADMIN_TRUSTED_PROXY_COUNT', '0'))
 
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+ALLOWED_HOSTS = [
+    h.strip() for h in os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',') if h.strip()
+]
 
 # Application definition
 INSTALLED_APPS = [
@@ -82,6 +113,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'utils.admin_security.AdminIPAllowlistMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -176,7 +208,7 @@ CORS_ALLOW_CREDENTIALS = True
 # REST Framework
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.TokenAuthentication',
+        'utils.authentication.ExpiringTokenAuthentication',
         'rest_framework.authentication.SessionAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
@@ -191,7 +223,17 @@ REST_FRAMEWORK = {
     'DEFAULT_FILTER_BACKENDS': [
         'django_filters.rest_framework.DjangoFilterBackend',
     ],
+    'EXCEPTION_HANDLER': 'utils.exceptions.custom_exception_handler',
+    # Only views that opt in with throttle_scope are throttled (login/register).
+    'DEFAULT_THROTTLE_RATES': {
+        'login': os.getenv('THROTTLE_LOGIN', '10/min'),
+        'register': os.getenv('THROTTLE_REGISTER', '10/hour'),
+    },
 }
+
+# The browsable API is a debugging aid; expose JSON only in production.
+if not DEBUG:
+    REST_FRAMEWORK['DEFAULT_RENDERER_CLASSES'] = ['rest_framework.renderers.JSONRenderer']
 
 # Celery Configuration
 CELERY_BROKER_URL = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
@@ -257,3 +299,20 @@ EMAIL_BACKEND = 'sendgrid_backend.SendgridBackend'
 SENDGRID_API_KEY = os.getenv('SENDGRID_API_KEY', '')
 SENDGRID_SANDBOX_MODE_IN_DEBUG = False
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'TrackRival <noreply@trackrival.app>')
+
+
+# ---------------------------------------------------------------------------
+# HTTPS / cookie hardening. Set USE_HTTPS=True once the site is served over TLS.
+# ---------------------------------------------------------------------------
+USE_HTTPS = os.getenv('USE_HTTPS', 'False').strip().lower() == 'true'
+if USE_HTTPS:
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = int(os.getenv('SECURE_HSTS_SECONDS', '31536000'))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SESSION_COOKIE_HTTPONLY = True
+X_FRAME_OPTIONS = 'DENY'

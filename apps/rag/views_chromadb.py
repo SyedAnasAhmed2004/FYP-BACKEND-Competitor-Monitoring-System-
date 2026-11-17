@@ -5,6 +5,8 @@ import json
 import os
 import time
 from rest_framework import status
+from utils.exceptions import error_response_from_exception, is_service_unavailable
+from utils.authentication import get_valid_token
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -15,6 +17,10 @@ from django.views.decorators.csrf import csrf_exempt
 
 from .rag_service_chromadb import RAGServiceChroma
 from .agents.orchestrator_agno import OrchestratorAgent
+import logging
+import uuid
+
+logger = logging.getLogger(__name__)
 
 
 # Initialize Agno agent system (singleton pattern)
@@ -82,10 +88,7 @@ def rag_query(request):
         return Response(result, status=status.HTTP_200_OK)
         
     except Exception as e:
-        return Response(
-            {'error': f'Error processing query: {str(e)}'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+        return error_response_from_exception(e, 'processing query', logger=logger)
 
 
 @api_view(['POST'])
@@ -123,10 +126,7 @@ def semantic_search(request):
         
         return Response(result, status=status.HTTP_200_OK)
     except Exception as e:
-        return Response(
-            {'error': f'Error performing search: {str(e)}'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+        return error_response_from_exception(e, 'performing search', logger=logger)
 
 
 @api_view(['GET'])
@@ -142,10 +142,7 @@ def rag_stats(request):
         stats = rag_service.get_stats(user_id=request.user.id)
         return Response(stats, status=status.HTTP_200_OK)
     except Exception as e:
-        return Response(
-            {'error': f'Error fetching statistics: {str(e)}'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+        return error_response_from_exception(e, 'fetching statistics', logger=logger)
 
 
 @api_view(['GET'])
@@ -166,10 +163,7 @@ def get_competitors(request):
         }
         return Response({'competitors': [all_option] + competitors}, status=status.HTTP_200_OK)
     except Exception as e:
-        return Response(
-            {'error': f'Error fetching competitors: {str(e)}'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+        return error_response_from_exception(e, 'fetching competitors', logger=logger)
 
 
 @csrf_exempt
@@ -194,10 +188,9 @@ def rag_query_stream(request):
     auth_header = request.META.get("HTTP_AUTHORIZATION", "")
     if not auth_header.startswith("Token "):
         return JsonResponse({"error": "Authentication required"}, status=401)
-    try:
-        token = Token.objects.select_related("user").get(key=auth_header[6:])
-    except Token.DoesNotExist:
-        return JsonResponse({"error": "Invalid token"}, status=401)
+    token = get_valid_token(auth_header[6:].strip())
+    if token is None:
+        return JsonResponse({"error": "Invalid or expired token"}, status=401)
 
     try:
         body = json.loads(request.body)
@@ -280,7 +273,14 @@ def rag_query_stream(request):
                 }, rag_cache_ttl)
 
         except Exception as e:
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            error_id = uuid.uuid4().hex[:8]
+            logger.error("[%s] Streaming RAG query failed: %s", error_id, e, exc_info=True)
+            friendly = (
+                "A required service is temporarily unavailable. Please try again shortly."
+                if is_service_unavailable(e)
+                else "An unexpected error occurred while generating the answer."
+            )
+            yield f"data: {json.dumps({'type': 'error', 'message': friendly, 'error_id': error_id})}\n\n"
 
     response = StreamingHttpResponse(event_stream(), content_type="text/event-stream")
     response["Cache-Control"] = "no-cache"
@@ -310,8 +310,5 @@ def agent_stats(request):
         
         return Response(agent_statistics, status=status.HTTP_200_OK)
     except Exception as e:
-        return Response(
-            {'error': f'Error fetching agent statistics: {str(e)}'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+        return error_response_from_exception(e, 'fetching agent statistics', logger=logger)
 

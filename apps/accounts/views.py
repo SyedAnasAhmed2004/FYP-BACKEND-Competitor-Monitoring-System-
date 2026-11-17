@@ -3,6 +3,10 @@ from datetime import timedelta
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
+from utils.exceptions import error_response_from_exception
+import logging
+
+logger = logging.getLogger(__name__)
 from rest_framework.permissions import IsAuthenticated
 
 from django.utils import timezone
@@ -468,4 +472,7 @@ class TestAlertEmailView(APIView):
 
             return Response({'status': 'success', 'message': f'Alert emails triggered: {alert_type}'})
         except Exception as e:
-            return Response({'status': 'error', 'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return error_response_from_exception(
+                e, 'triggering alert emails', logger=logger,
+                extra={'status': 'error'},
+            )

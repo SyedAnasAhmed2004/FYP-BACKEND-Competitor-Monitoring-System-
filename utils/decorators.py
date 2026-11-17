@@ -6,6 +6,7 @@ from django.core.cache import cache
 from rest_framework import status
 from rest_framework.response import Response
 import logging
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -66,12 +67,14 @@ def handle_exceptions(func):
         try:
             return func(*args, **kwargs)
         except Exception as e:
-            logger.error(f"Error in {func.__name__}: {str(e)}", exc_info=True)
+            error_id = uuid.uuid4().hex[:8]
+            logger.error(f"[{error_id}] Error in {func.__name__}: {e}", exc_info=True)
             return Response(
                 {
                     "success": False,
                     "message": "An error occurred",
-                    "error": str(e)
+                    "error": "An unexpected error occurred.",
+                    "error_id": error_id,
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )

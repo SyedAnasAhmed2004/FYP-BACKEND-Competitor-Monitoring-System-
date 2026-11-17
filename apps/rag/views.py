@@ -2,11 +2,15 @@
 RAG API Views for querying the knowledge base with ChromaDB.
 """
 from rest_framework import status
+from utils.exceptions import error_response_from_exception
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from .rag_service_chromadb import RAGServiceChroma
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class VectorDocumentViewSet(viewsets.ReadOnlyModelViewSet):
@@ -55,10 +59,7 @@ def rag_query(request):
         )
         return Response(result, status=status.HTTP_200_OK)
     except Exception as e:
-        return Response(
-            {'error': f'Error processing query: {str(e)}'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+        return error_response_from_exception(e, 'processing query', logger=logger)
 
 
 @api_view(['POST'])
@@ -93,10 +94,7 @@ def semantic_search(request):
             'total_results': len(results)
         }, status=status.HTTP_200_OK)
     except Exception as e:
-        return Response(
-            {'error': f'Error performing search: {str(e)}'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+        return error_response_from_exception(e, 'performing search', logger=logger)
 
 
 @api_view(['GET'])
@@ -129,10 +127,7 @@ def rag_stats(request):
             'avg_total_time': round(query_stats['avg_total_time'] or 0, 3)
         }, status=status.HTTP_200_OK)
     except Exception as e:
-        return Response(
-            {'error': f'Error fetching statistics: {str(e)}'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+        return error_response_from_exception(e, 'fetching statistics', logger=logger)
 
 
 @api_view(['GET'])
@@ -167,10 +162,7 @@ def query_history(request):
         
         return Response(result, status=status.HTTP_200_OK)
     except Exception as e:
-        return Response(
-            {'error': f'Error fetching history: {str(e)}'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+        return error_response_from_exception(e, 'fetching history', logger=logger)
 
 
 @api_view(['GET'])
@@ -205,10 +197,7 @@ def get_competitors(request):
         
         return Response(result, status=status.HTTP_200_OK)
     except Exception as e:
-        return Response(
-            {'error': f'Error fetching competitors: {str(e)}'},
-            status=status.HTTP_500_INTERNAL_SERVER_ERROR
-        )
+        return error_response_from_exception(e, 'fetching competitors', logger=logger)
 
 
 # Keep the old class-based view for backward compatibility

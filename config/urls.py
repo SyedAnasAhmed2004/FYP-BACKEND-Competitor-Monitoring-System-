@@ -6,8 +6,11 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 
+handler404 = 'utils.error_views.not_found'
+handler500 = 'utils.error_views.server_error'
+
 urlpatterns = [
-    path('admin/', admin.site.urls),
+    path(settings.ADMIN_URL, admin.site.urls),
     path('api/accounts/', include('apps.accounts.urls')),
     path('api/monitoring/', include('apps.monitoring.urls')),
     path('api/scraping/', include('apps.scraping.urls')),
