@@ -3,8 +3,8 @@ from rest_framework.routers import DefaultRouter
 from .views import ScrapingConfigViewSet, ScrapingLogViewSet
 
 router = DefaultRouter()
-router.register(r'configs', ScrapingConfigViewSet)
-router.register(r'logs', ScrapingLogViewSet)
+router.register(r'configs', ScrapingConfigViewSet, basename='scrapingconfig')
+router.register(r'logs', ScrapingLogViewSet, basename='scrapinglog')
 
 urlpatterns = [
     path('', include(router.urls)),

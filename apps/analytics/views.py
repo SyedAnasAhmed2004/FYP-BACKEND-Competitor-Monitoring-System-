@@ -7,9 +7,13 @@ from .serializers import CompetitorMetricsSerializer, TrendAnalysisSerializer
 
 class CompetitorMetricsViewSet(viewsets.ReadOnlyModelViewSet):
     """ViewSet for viewing competitor metrics."""
-    queryset = CompetitorMetrics.objects.all()
     serializer_class = CompetitorMetricsSerializer
     filterset_fields = ['competitor', 'metric_type', 'date']
+
+    def get_queryset(self):
+        return CompetitorMetrics.objects.filter(
+            competitor__user=self.request.user, competitor__is_deleted=False
+        ).select_related('competitor')
     
     @action(detail=False, methods=['get'])
     def summary(self, request):
@@ -20,9 +24,13 @@ class CompetitorMetricsViewSet(viewsets.ReadOnlyModelViewSet):
 
 class TrendAnalysisViewSet(viewsets.ReadOnlyModelViewSet):
     """ViewSet for viewing trend analysis."""
-    queryset = TrendAnalysis.objects.all()
     serializer_class = TrendAnalysisSerializer
     filterset_fields = ['competitor', 'trend_type', 'trend_direction']
+
+    def get_queryset(self):
+        return TrendAnalysis.objects.filter(
+            competitor__user=self.request.user, competitor__is_deleted=False
+        ).select_related('competitor')
     
     @action(detail=False, methods=['get'])
     def latest(self, request):
